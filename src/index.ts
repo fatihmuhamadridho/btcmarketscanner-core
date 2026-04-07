@@ -1,5 +1,5 @@
 export function helloCore() {
-  return "btcmarketscanner-core is working 🚀";
+  return "btcmarketscanner-core is working 🚀. Test";
 }
 
 export function formatText(symbol: string) {

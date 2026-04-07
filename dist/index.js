@@ -25,7 +25,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 function helloCore() {
-  return "btcmarketscanner-core is working \u{1F680}";
+  return "btcmarketscanner-core is working \u{1F680}. Test";
 }
 function formatText(symbol) {
   return `[core] scanning ${symbol}`;
