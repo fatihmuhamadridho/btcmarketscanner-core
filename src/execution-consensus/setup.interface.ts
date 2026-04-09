@@ -1,0 +1,39 @@
+import type { SetupCandle, SetupInsight, SupportResistance, TrendInsight } from './types';
+
+export type CoinSetupSide = 'long' | 'short';
+
+export type CoinSetupPathStatus = {
+  break: boolean;
+  rejection: boolean;
+  retest: boolean;
+};
+
+export type CoinSetupAnalysisContext = {
+  atr: number | null;
+  atr14: number | null;
+  breakdownShort: boolean;
+  breakoutLong: boolean;
+  bullishStructure: boolean;
+  bearishStructure: boolean;
+  candles: SetupCandle[];
+  continuationMode: boolean;
+  lastPrice: number;
+  emaScore: number;
+  nearResistance: boolean;
+  nearSupport: boolean;
+  orderedCandles: SetupCandle[];
+  pathMode: SetupInsight['pathMode'];
+  pathStatus: CoinSetupPathStatus;
+  range: number;
+  rsi14: number | null;
+  side: CoinSetupSide;
+  scoreBase: number;
+  structureScore: number;
+  stopBuffer: number;
+  supportResistance: SupportResistance;
+  targetBuffer: number;
+  trendBiasScore: number;
+  trendSummary: TrendInsight;
+  volumeScore: number;
+  zoneBuffer: number;
+};
