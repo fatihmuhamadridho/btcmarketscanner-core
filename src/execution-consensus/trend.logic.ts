@@ -1,17 +1,26 @@
-import type { SupportResistance, TrendCandle, TrendInsight } from './types';
+import type { SupportResistance, TrendCandle, TrendDirection, TrendInsight } from './types';
 
 export function getAverageTrueRange(candles: Array<{ close: number; high: number; low: number }>, period = 14) {
-  if (candles.length < 2) return null;
-  const startIndex = Math.max(1, candles.length - period);
-  const trueRanges: number[] = [];
+  if (candles.length < period + 1) return null;
 
-  for (let index = startIndex; index < candles.length; index += 1) {
+  // Seed: simple average of first `period` true ranges
+  let atr = 0;
+  for (let index = 1; index <= period; index += 1) {
     const current = candles[index];
     const previous = candles[index - 1];
-    trueRanges.push(Math.max(current.high - current.low, Math.abs(current.high - previous.close), Math.abs(current.low - previous.close)));
+    atr += Math.max(current.high - current.low, Math.abs(current.high - previous.close), Math.abs(current.low - previous.close));
+  }
+  atr /= period;
+
+  // Wilder's smoothing over the rest of the candles
+  for (let index = period + 1; index < candles.length; index += 1) {
+    const current = candles[index];
+    const previous = candles[index - 1];
+    const tr = Math.max(current.high - current.low, Math.abs(current.high - previous.close), Math.abs(current.low - previous.close));
+    atr = (atr * (period - 1) + tr) / period;
   }
 
-  return trueRanges.length ? trueRanges.reduce((sum, value) => sum + value, 0) / trueRanges.length : null;
+  return atr;
 }
 
 export function getExponentialMovingAverage(values: number[], period: number, endIndex: number) {
@@ -33,20 +42,29 @@ export function getExponentialMovingAverage(values: number[], period: number, en
 export function getRelativeStrengthIndex(candles: Array<{ close: number }>, period = 14) {
   if (candles.length < period + 1) return null;
   const closes = candles.map((candle) => candle.close);
-  let gainSum = 0;
-  let lossSum = 0;
 
-  for (let index = closes.length - period; index < closes.length; index += 1) {
+  // Seed: simple average of first `period` changes
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let index = 1; index <= period; index += 1) {
     const change = closes[index] - closes[index - 1];
-    if (change > 0) gainSum += change;
-    else lossSum += Math.abs(change);
+    if (change > 0) avgGain += change;
+    else avgLoss += Math.abs(change);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  // Wilder's smoothing over the rest of the candles
+  for (let index = period + 1; index < closes.length; index += 1) {
+    const change = closes[index] - closes[index - 1];
+    const gain = change > 0 ? change : 0;
+    const loss = change < 0 ? Math.abs(change) : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
   }
 
-  const averageGain = gainSum / period;
-  const averageLoss = lossSum / period;
-  if (averageLoss === 0) return 100;
-  const relativeStrength = averageGain / averageLoss;
-  return 100 - 100 / (1 + relativeStrength);
+  if (avgLoss === 0) return 100;
+  return 100 - 100 / (1 + avgGain / avgLoss);
 }
 
 export function getSupportResistance(candles: TrendCandle[], windowSize: number): SupportResistance | null {
@@ -118,16 +136,49 @@ export function analyzeTrend(candles: TrendCandle[], supportResistance: SupportR
 
   const closes = candles.map((candle) => candle.close);
   const volumes = candles.map((candle) => candle.volume);
-  const firstPrice = closes[0];
   const lastPrice = closes[closes.length - 1];
-  const changePercent = ((lastPrice - firstPrice) / firstPrice) * 100;
-  const direction = changePercent > 0.75 ? 'bullish' : changePercent < -0.75 ? 'bearish' : 'sideways';
+  // Rolling 24h change: find the candle closest to 24 hours ago
+  const oneDayAgoMs = Date.now() - 24 * 60 * 60 * 1000;
+  let refIndex = -1;
+  for (let i = candles.length - 1; i >= 0; i--) {
+    if (candles[i].openTime <= oneDayAgoMs) {
+      refIndex = i;
+      break;
+    }
+  }
+  const dayOpenPrice = refIndex >= 0 ? closes[refIndex] : closes[0];
+  const firstPrice = dayOpenPrice;
+  const changePercent = dayOpenPrice !== 0 ? ((lastPrice - dayOpenPrice) / dayOpenPrice) * 100 : 0;
   const atr14 = getAverageTrueRange(candles, 14);
   const rsi14 = getRelativeStrengthIndex(candles, 14);
   const ema20 = getExponentialMovingAverage(closes, 20, closes.length - 1);
   const ema50 = getExponentialMovingAverage(closes, 50, closes.length - 1);
   const ema100 = getExponentialMovingAverage(closes, 100, closes.length - 1);
   const ema200 = getExponentialMovingAverage(closes, 200, closes.length - 1);
+
+  // Direction: EMA stack + price position takes priority over daily % change
+  const hasFullEmaStack = ema20 !== null && ema50 !== null && ema100 !== null && ema200 !== null;
+  const emaBullishStack = hasFullEmaStack && ema20! > ema50! && ema50! > ema100! && ema100! > ema200!;
+  const emaBearishStack = hasFullEmaStack && ema20! < ema50! && ema50! < ema100! && ema100! < ema200!;
+  const priceAboveEma50 = ema50 !== null && lastPrice > ema50;
+  const priceBelowEma50 = ema50 !== null && lastPrice < ema50;
+  const shortLookback = Math.min(20, closes.length - 1);
+  const shortTermChange =
+    closes.length > 1
+      ? ((lastPrice - closes[closes.length - 1 - shortLookback]) / closes[closes.length - 1 - shortLookback]) * 100
+      : changePercent;
+  let direction: TrendDirection;
+  if (emaBullishStack && priceAboveEma50) {
+    direction = 'bullish';
+  } else if (emaBearishStack && priceBelowEma50) {
+    direction = 'bearish';
+  } else if (shortTermChange > 1.0 || changePercent > 1.0) {
+    direction = 'bullish';
+  } else if (shortTermChange < -1.0 || changePercent < -1.0) {
+    direction = 'bearish';
+  } else {
+    direction = 'sideways';
+  }
   const ma20 = getSimpleMovingAverage(closes, 20, closes.length - 1);
   const ma50 = getSimpleMovingAverage(closes, 50, closes.length - 1);
   const ma200 = getSimpleMovingAverage(closes, 200, closes.length - 1);
